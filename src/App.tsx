@@ -215,9 +215,17 @@ function MainWorkspace() {
     try {
       await signInWithPopup(auth, googleProvider);
     } catch (err) {
-      setAuthError(
-        err instanceof Error ? err.message : 'Gagal menghubungkan akun Google.'
-      );
+      const code = (err as { code?: string })?.code || '';
+      if (code === 'auth/unauthorized-domain') {
+        const host = typeof window !== 'undefined' ? window.location.hostname : 'domain-vercel-anda';
+        setAuthError(
+          `Domain "${host}" belum didaftarkan di Firebase Console (Authentication → Settings → Authorized domains). Data tetap tersimpan otomatis di browser.`
+        );
+      } else {
+        setAuthError(
+          err instanceof Error ? err.message : 'Gagal menghubungkan akun Google.'
+        );
+      }
     } finally {
       setLoginBusy(false);
     }
