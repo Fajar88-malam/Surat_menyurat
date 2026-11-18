@@ -1,0 +1,123 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Plus Jakarta Sans", system-ui, -apple-system, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+@layer base {
+  body {
+    font-family: var(--font-sans);
+    color: #0f172a;
+    background-color: #f8fafc;
+  }
+
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+.font-kemendagri-arial {
+  font-family: Arial, "Helvetica Neue", Helvetica, sans-serif;
+}
+
+.font-kemendagri-bookman {
+  font-family: "Bookman Old Style", "URW Bookman", "Book Antiqua", Georgia, serif;
+}
+
+/* On-screen A4 paper sheet simulation with normal margins */
+.a4-page {
+  width: 210mm;
+  min-height: 297mm;
+  padding: 20mm 20mm 20mm 20mm;
+  background: #ffffff;
+  color: #000000;
+  box-sizing: border-box;
+  line-height: 1.45;
+}
+
+.a4-page.margin-kemendagri {
+  padding: 15mm 18mm 15mm 25mm;
+}
+
+.a4-page.margin-normal {
+  padding: 20mm 20mm 20mm 20mm;
+}
+
+.a4-page.paper-f4 {
+  width: 215mm;
+  min-height: 330mm;
+}
+
+/* Print portal hidden on screen */
+#esurat-print-area {
+  display: none;
+}
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 20mm 20mm 20mm 20mm;
+  }
+
+  html,
+  body {
+    background: #ffffff !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    height: auto !important;
+    overflow: visible !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Hide entire interactive UI root so no flex/overflow/hidden breaks printing */
+  #root {
+    display: none !important;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  /* Show only the dedicated print portal directly mounted under body */
+  #esurat-print-area {
+    display: block !important;
+    position: static !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+  }
+
+  #esurat-print-area .print-only-root {
+    display: block !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Let @page handle physical paper margins cleanly without double padding or overflow */
+  #esurat-print-area .a4-page {
+    width: 100% !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    transform: none !important;
+    page-break-after: always;
+    break-after: page;
+  }
+
+  #esurat-print-area .a4-page:last-child {
+    page-break-after: auto;
+    break-after: auto;
+  }
+
+  #esurat-print-area table,
+  #esurat-print-area tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+}

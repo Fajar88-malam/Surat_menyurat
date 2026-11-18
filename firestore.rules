@@ -1,0 +1,253 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global safety net: default deny everything
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Primitive Helpers ---
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isDocOwner() {
+      return isSignedIn() && existing().ownerId == request.auth.uid;
+    }
+
+    function isValidOptionalStr(data, key, maxLen) {
+      return !(key in data) || (data[key] is string && data[key].size() <= maxLen);
+    }
+
+    // --- Validation Blueprints ---
+    function isValidSchoolSettings(data, userId) {
+      return data.keys().hasAll([
+          'ownerId', 'pemerintahDaerah', 'dinasPendidikan', 'namaSekolah',
+          'alamat', 'kota', 'kodeUnitSurat', 'kepalaSekolahNama',
+          'tampilkanLogoKanan', 'polaPenomoran', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'pemerintahDaerah', 'dinasPendidikan', 'namaSekolah',
+          'npsn', 'alamat', 'kota', 'kodePos', 'telepon', 'email', 'website',
+          'kodeUnitSurat', 'kepalaSekolahNama', 'kepalaSekolahNip',
+          'kepalaSekolahPangkat', 'logoDaerahDataUrl', 'logoSekolahDataUrl',
+          'tampilkanLogoKanan', 'polaPenomoran', 'createdAt', 'updatedAt'
+        ])
+        && data.ownerId == request.auth.uid
+        && data.ownerId == userId
+        && data.pemerintahDaerah is string && data.pemerintahDaerah.size() >= 2 && data.pemerintahDaerah.size() <= 150
+        && data.dinasPendidikan is string && data.dinasPendidikan.size() >= 2 && data.dinasPendidikan.size() <= 150
+        && data.namaSekolah is string && data.namaSekolah.size() >= 2 && data.namaSekolah.size() <= 150
+        && data.alamat is string && data.alamat.size() >= 2 && data.alamat.size() <= 250
+        && data.kota is string && data.kota.size() >= 2 && data.kota.size() <= 100
+        && data.kodeUnitSurat is string && data.kodeUnitSurat.size() >= 1 && data.kodeUnitSurat.size() <= 60
+        && data.kepalaSekolahNama is string && data.kepalaSekolahNama.size() >= 2 && data.kepalaSekolahNama.size() <= 120
+        && data.tampilkanLogoKanan is bool
+        && data.polaPenomoran in ['kemendagri_2023', 'kemendagri_bulan_romawi', 'kemendagri_bulan_angka']
+        && isValidOptionalStr(data, 'npsn', 20)
+        && isValidOptionalStr(data, 'kodePos', 15)
+        && isValidOptionalStr(data, 'telepon', 40)
+        && isValidOptionalStr(data, 'email', 120)
+        && isValidOptionalStr(data, 'website', 120)
+        && isValidOptionalStr(data, 'kepalaSekolahNip', 40)
+        && isValidOptionalStr(data, 'kepalaSekolahPangkat', 80)
+        && isValidOptionalStr(data, 'logoDaerahDataUrl', 260000)
+        && isValidOptionalStr(data, 'logoSekolahDataUrl', 260000)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidEmployee(data) {
+      return data.keys().hasAll([
+          'ownerId', 'nama', 'jabatan', 'statusKepegawaian', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'nama', 'nip', 'nuptk', 'pangkatGolongan', 'jabatan',
+          'statusKepegawaian', 'unitKerja', 'telepon', 'email', 'createdAt', 'updatedAt'
+        ])
+        && data.ownerId == request.auth.uid
+        && data.nama is string && data.nama.size() >= 2 && data.nama.size() <= 140
+        && data.jabatan is string && data.jabatan.size() >= 1 && data.jabatan.size() <= 120
+        && data.statusKepegawaian in ['PNS', 'PPPK', 'Honorer', 'CPNS']
+        && isValidOptionalStr(data, 'nip', 40)
+        && isValidOptionalStr(data, 'nuptk', 40)
+        && isValidOptionalStr(data, 'pangkatGolongan', 80)
+        && isValidOptionalStr(data, 'unitKerja', 120)
+        && isValidOptionalStr(data, 'telepon', 30)
+        && isValidOptionalStr(data, 'email', 120)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidStudent(data) {
+      return data.keys().hasAll([
+          'ownerId', 'nama', 'kelas', 'jenisKelamin', 'status', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'nama', 'nis', 'nisn', 'tempatLahir', 'tanggalLahir',
+          'jenisKelamin', 'kelas', 'namaOrangTua', 'pekerjaanOrangTua',
+          'alamat', 'teleponOrangTua', 'status', 'createdAt', 'updatedAt'
+        ])
+        && data.ownerId == request.auth.uid
+        && data.nama is string && data.nama.size() >= 2 && data.nama.size() <= 140
+        && data.kelas is string && data.kelas.size() >= 1 && data.kelas.size() <= 40
+        && data.jenisKelamin in ['L', 'P']
+        && data.status in ['Aktif', 'Mutasi Keluar', 'Lulus']
+        && isValidOptionalStr(data, 'nis', 30)
+        && isValidOptionalStr(data, 'nisn', 30)
+        && isValidOptionalStr(data, 'tempatLahir', 80)
+        && isValidOptionalStr(data, 'tanggalLahir', 30)
+        && isValidOptionalStr(data, 'namaOrangTua', 140)
+        && isValidOptionalStr(data, 'pekerjaanOrangTua', 100)
+        && isValidOptionalStr(data, 'alamat', 250)
+        && isValidOptionalStr(data, 'teleponOrangTua', 30)
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidLetter(data) {
+      return data.keys().hasAll([
+          'ownerId', 'kategori', 'subKategori', 'kodeKlasifikasi', 'nomorUrut',
+          'nomorSurat', 'tanggalSurat', 'perihal', 'status', 'modeTtd',
+          'payload', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'kategori', 'subKategori', 'kodeKlasifikasi', 'nomorUrut',
+          'nomorSurat', 'tanggalSurat', 'perihal', 'tujuanSurat', 'status',
+          'modeTtd', 'payload', 'createdAt', 'updatedAt'
+        ])
+        && data.ownerId == request.auth.uid
+        && data.kategori in [
+          'surat_tugas_sppd', 'surat_keterangan', 'surat_mutasi',
+          'surat_penerimaan_mutasi', 'surat_undangan', 'surat_panggilan'
+        ]
+        && data.subKategori is string && data.subKategori.size() >= 1 && data.subKategori.size() <= 60
+        && data.kodeKlasifikasi is string && data.kodeKlasifikasi.size() >= 1 && data.kodeKlasifikasi.size() <= 30
+        && data.nomorUrut is string && data.nomorUrut.size() >= 1 && data.nomorUrut.size() <= 20
+        && data.nomorSurat is string && data.nomorSurat.size() >= 3 && data.nomorSurat.size() <= 120
+        && data.tanggalSurat is string && data.tanggalSurat.size() >= 4 && data.tanggalSurat.size() <= 30
+        && data.perihal is string && data.perihal.size() >= 2 && data.perihal.size() <= 220
+        && isValidOptionalStr(data, 'tujuanSurat', 200)
+        && data.status in ['draf', 'terbit', 'arsip']
+        && data.modeTtd in ['tte', 'basah']
+        && data.payload is map && data.payload.keys().size() <= 40
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // --- Collection Rules ---
+    match /schoolSettings/{userId} {
+      allow get: if isValidId(userId) && isOwner(userId);
+      allow list: if false;
+      allow create: if isVerified() && isValidId(userId) && isOwner(userId)
+        && isValidSchoolSettings(incoming(), userId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isVerified() && isValidId(userId) && isOwner(userId)
+        && isValidSchoolSettings(incoming(), userId)
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'pemerintahDaerah', 'dinasPendidikan', 'namaSekolah', 'npsn',
+          'alamat', 'kota', 'kodePos', 'telepon', 'email', 'website',
+          'kodeUnitSurat', 'kepalaSekolahNama', 'kepalaSekolahNip',
+          'kepalaSekolahPangkat', 'logoDaerahDataUrl', 'logoSekolahDataUrl',
+          'tampilkanLogoKanan', 'polaPenomoran', 'updatedAt'
+        ]);
+      allow delete: if isVerified() && isValidId(userId) && isOwner(userId);
+    }
+
+    match /employees/{employeeId} {
+      allow get: if isValidId(employeeId) && isDocOwner();
+      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow create: if isVerified() && isValidId(employeeId)
+        && isValidEmployee(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isVerified() && isValidId(employeeId)
+        && isValidEmployee(incoming())
+        && isDocOwner()
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'nama', 'nip', 'nuptk', 'pangkatGolongan', 'jabatan',
+          'statusKepegawaian', 'unitKerja', 'telepon', 'email', 'updatedAt'
+        ]);
+      allow delete: if isVerified() && isValidId(employeeId) && isDocOwner();
+    }
+
+    match /students/{studentId} {
+      allow get: if isValidId(studentId) && isDocOwner();
+      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow create: if isVerified() && isValidId(studentId)
+        && isValidStudent(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isVerified() && isValidId(studentId)
+        && isValidStudent(incoming())
+        && isDocOwner()
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'nama', 'nis', 'nisn', 'tempatLahir', 'tanggalLahir',
+          'jenisKelamin', 'kelas', 'namaOrangTua', 'pekerjaanOrangTua',
+          'alamat', 'teleponOrangTua', 'status', 'updatedAt'
+        ]);
+      allow delete: if isVerified() && isValidId(studentId) && isDocOwner();
+    }
+
+    match /letters/{letterId} {
+      allow get: if isValidId(letterId) && isDocOwner();
+      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow create: if isVerified() && isValidId(letterId)
+        && isValidLetter(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isVerified() && isValidId(letterId)
+        && isValidLetter(incoming())
+        && isDocOwner()
+        && existing().status != 'arsip'
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          (
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'subKategori', 'kodeKlasifikasi', 'nomorUrut', 'nomorSurat',
+              'tanggalSurat', 'perihal', 'tujuanSurat', 'status', 'modeTtd',
+              'payload', 'updatedAt'
+            ])
+          ) ||
+          (
+            incoming().status == 'arsip'
+            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
+          )
+        );
+      allow delete: if isVerified() && isValidId(letterId) && isDocOwner() && existing().status != 'arsip';
+    }
+  }
+}

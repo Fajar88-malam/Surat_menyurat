@@ -1,0 +1,8 @@
+{
+  "name": "E-Surat Sekolah — Tata Naskah Dinas Kemendagri",
+  "description": "Aplikasi surat menyurat elektronik instansi pemerintahan di lingkungan sekolah sesuai Permendagri Tata Naskah Dinas terbaru: Surat Tugas & SPPD, Surat Keterangan Pegawai/Siswa, Mutasi Masuk/Keluar, Undangan Rapat, dan Surat Panggilan Orang Tua.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
