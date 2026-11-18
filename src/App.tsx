@@ -12,7 +12,6 @@ import {
   Building2,
   Database,
   FilePlus2,
-  KeyRound,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -33,13 +32,7 @@ import {
   handleFirestoreError,
   OperationType,
 } from './firebase';
-import {
-  AuthMode,
-  checkAdminSession,
-  fetchAdminWorkspace,
-  loginAdmin,
-  logoutAdmin,
-} from './services/dataService';
+import { AuthMode, fetchAdminWorkspace } from './services/dataService';
 import {
   Employee,
   LetterCategory,
@@ -75,11 +68,8 @@ const VIEW_TITLES: Record<NavView, string> = {
 
 function MainWorkspace() {
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
-  const [adminUser, setAdminUser] = useState<string | null>(null);
   const [authReady, setAuthReady] = useState(false);
 
-  const [usernameInput, setUsernameInput] = useState('admin');
-  const [passwordInput, setPasswordInput] = useState('');
   const [loginBusy, setLoginBusy] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
 
@@ -95,11 +85,7 @@ function MainWorkspace() {
   const [letters, setLetters] = useState<LetterRecord[]>([]);
   const [dataLoading, setDataLoading] = useState(true);
 
-  const authMode: AuthMode | null = adminUser
-    ? 'admin'
-    : firebaseUser
-    ? 'google'
-    : null;
+  const authMode: AuthMode = firebaseUser ? 'google' : 'admin';
 
   const loadAdminWorkspace = useCallback(async () => {
     try {
@@ -121,30 +107,9 @@ function MainWorkspace() {
   }, []);
 
   useEffect(() => {
-    let firebaseChecked = false;
-    let adminChecked = false;
-
-    const finishIfBoth = () => {
-      if (firebaseChecked && adminChecked) {
-        setAuthReady(true);
-      }
-    };
-
-    void checkAdminSession()
-      .then((res) => {
-        if (res.authenticated && res.username) {
-          setAdminUser(res.username);
-        }
-      })
-      .finally(() => {
-        adminChecked = true;
-        finishIfBoth();
-      });
-
     const unsub = onAuthStateChanged(auth, (user) => {
       setFirebaseUser(user);
-      firebaseChecked = true;
-      finishIfBoth();
+      setAuthReady(true);
     });
 
     return () => unsub();
@@ -244,41 +209,21 @@ function MainWorkspace() {
     setDataLoading(false);
   }, [authReady, authMode, firebaseUser, loadAdminWorkspace]);
 
-  const handleAdminSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setAuthError(null);
-    setLoginBusy(true);
-    try {
-      const res = await loginAdmin(usernameInput, passwordInput);
-      setAdminUser(res.username);
-      setPasswordInput('');
-    } catch (err) {
-      setAuthError(err instanceof Error ? err.message : 'Login gagal.');
-    } finally {
-      setLoginBusy(false);
-    }
-  };
-
   const handleGoogleLogin = async () => {
     setAuthError(null);
     setLoginBusy(true);
     try {
       await signInWithPopup(auth, googleProvider);
-      setAdminUser(null);
     } catch (err) {
       setAuthError(
-        err instanceof Error ? err.message : 'Gagal masuk dengan akun Google.'
+        err instanceof Error ? err.message : 'Gagal menghubungkan akun Google.'
       );
     } finally {
       setLoginBusy(false);
     }
   };
 
-  const handleLogout = async () => {
-    if (adminUser) {
-      await logoutAdmin();
-      setAdminUser(null);
-    }
+  const handleDisconnectGoogle = async () => {
     if (firebaseUser) {
       await signOut(auth);
     }
@@ -287,98 +232,7 @@ function MainWorkspace() {
   if (!authReady) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-        <div className="text-sm text-slate-600">Memuat sesi aplikasi...</div>
-      </div>
-    );
-  }
-
-  if (!authMode) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
-        <div className="max-w-md w-full bg-white border border-slate-200 rounded-xl p-7 space-y-6">
-          <div className="space-y-2">
-            <div className="text-xs font-medium text-sky-800">
-              Tata Naskah Dinas Pemerintah · Kemendagri
-            </div>
-            <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
-              E-Surat Sekolah
-            </h1>
-            <p className="text-sm text-slate-600 leading-relaxed">
-              Aplikasi pengelolaan surat tugas &amp; SPPD, surat keterangan pegawai/siswa, mutasi, undangan rapat, dan panggilan orang tua sesuai aturan Kemendagri.
-            </p>
-          </div>
-
-          <form onSubmit={handleAdminSubmit} className="space-y-3.5">
-            <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">
-                Username
-              </label>
-              <input
-                required
-                type="text"
-                autoComplete="username"
-                value={usernameInput}
-                onChange={(e) => setUsernameInput(e.target.value)}
-                placeholder="admin"
-                className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-700/20 focus:border-sky-700"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-slate-700 mb-1">
-                Password
-              </label>
-              <input
-                required
-                type="password"
-                autoComplete="current-password"
-                value={passwordInput}
-                onChange={(e) => setPasswordInput(e.target.value)}
-                placeholder="Masukkan password"
-                className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-700/20 focus:border-sky-700"
-              />
-            </div>
-
-            {authError && (
-              <div className="px-3 py-2 text-xs bg-red-50 border border-red-200 text-red-700 rounded-lg">
-                {authError}
-              </div>
-            )}
-
-            <button
-              type="submit"
-              disabled={loginBusy}
-              className="w-full py-2.5 px-4 text-sm font-semibold text-white bg-sky-800 rounded-lg hover:bg-sky-900 transition-colors disabled:opacity-50"
-            >
-              {loginBusy ? 'Memverifikasi...' : 'Masuk ke Aplikasi'}
-            </button>
-
-            <div className="flex items-center gap-2 text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
-              <KeyRound className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-              <span>
-                Akses Operator: user <span className="font-mono font-semibold text-slate-700">admin</span> · password <span className="font-mono font-semibold text-slate-700">admin123</span>
-              </span>
-            </div>
-          </form>
-
-          <div className="relative flex items-center py-1">
-            <div className="flex-grow border-t border-slate-200" />
-            <span className="mx-3 text-xs text-slate-400">atau</span>
-            <div className="flex-grow border-t border-slate-200" />
-          </div>
-
-          <div className="space-y-2">
-            <button
-              type="button"
-              disabled={loginBusy}
-              onClick={handleGoogleLogin}
-              className="w-full py-2.5 px-4 text-xs font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors flex items-center justify-center gap-2"
-            >
-              <ShieldCheck className="w-4 h-4 text-sky-800 shrink-0" />
-              Masuk dengan Akun Google (Cloud Firestore)
-            </button>
-          </div>
-        </div>
+        <div className="text-sm text-slate-600">Memuat aplikasi E-Surat Sekolah...</div>
       </div>
     );
   }
@@ -479,25 +333,42 @@ function MainWorkspace() {
           </nav>
         </div>
 
-        <div className="p-4 border-t border-slate-200 space-y-3">
+        <div className="p-4 border-t border-slate-200 space-y-2.5">
           <div className="text-xs">
             <div className="font-semibold text-slate-900 truncate">
               {activeSettings.namaSekolah}
             </div>
             <div className="text-slate-500 truncate">
-              {authMode === 'admin'
-                ? `Operator: ${adminUser}`
-                : firebaseUser?.email || 'Cloud Firestore'}
+              {authMode === 'google'
+                ? firebaseUser?.email || 'Cloud Firestore'
+                : 'Operator Tata Usaha'}
             </div>
           </div>
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium text-slate-700 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors"
-          >
-            <LogOut className="w-3.5 h-3.5" />
-            Keluar Akun
-          </button>
+          {authError && (
+            <div className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1">
+              {authError}
+            </div>
+          )}
+          {authMode === 'google' ? (
+            <button
+              type="button"
+              onClick={handleDisconnectGoogle}
+              className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium text-slate-700 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              Putuskan Cloud Google
+            </button>
+          ) : (
+            <button
+              type="button"
+              disabled={loginBusy}
+              onClick={handleGoogleLogin}
+              className="w-full inline-flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium text-slate-700 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors disabled:opacity-50"
+            >
+              <ShieldCheck className="w-3.5 h-3.5 text-sky-800 shrink-0" />
+              {loginBusy ? 'Menghubungkan...' : 'Sinkron Cloud Google'}
+            </button>
+          )}
         </div>
       </aside>
 
