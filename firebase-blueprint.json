@@ -356,19 +356,19 @@
   "firestore": {
     "/schoolSettings/{userId}": {
       "schema": { "$ref": "#/entities/SchoolSettings" },
-      "description": "Pengaturan kop surat, logo, kepala sekolah, dan penomoran milik masing-masing operator sekolah."
+      "description": "Pengaturan kop surat, logo, kepala sekolah, dan penomoran milik operator sekolah atau workspace bersama sekolah (smpnegeripacet_shared)."
     },
     "/employees/{employeeId}": {
       "schema": { "$ref": "#/entities/Employee" },
-      "description": "Daftar pegawai/guru yang terisolasi berdasarkan ownerId."
+      "description": "Daftar pegawai/guru yang terisolasi berdasarkan ownerId atau workspace bersama sekolah."
     },
     "/students/{studentId}": {
       "schema": { "$ref": "#/entities/Student" },
-      "description": "Daftar siswa dan data orang tua yang terisolasi berdasarkan ownerId."
+      "description": "Daftar siswa dan data orang tua yang terisolasi berdasarkan ownerId atau workspace bersama sekolah."
     },
     "/letters/{letterId}": {
       "schema": { "$ref": "#/entities/Letter" },
-      "description": "Buku agenda dan arsip naskah dinas elektronik yang terisolasi berdasarkan ownerId."
+      "description": "Buku agenda dan arsip naskah dinas elektronik yang terisolasi berdasarkan ownerId atau workspace bersama sekolah."
     }
   }
 }

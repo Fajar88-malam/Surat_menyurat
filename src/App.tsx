@@ -3,9 +3,13 @@ import { onAuthStateChanged, signInWithPopup, signOut, User } from 'firebase/aut
 import {
   collection,
   doc,
+  getDoc,
+  getDocs,
   onSnapshot,
   query,
+  serverTimestamp,
   where,
+  writeBatch,
 } from 'firebase/firestore';
 import {
   Archive,
@@ -66,6 +70,21 @@ const VIEW_TITLES: Record<NavView, string> = {
   settings: 'Profil Instansi & Upload Logo',
 };
 
+const SHARED_SCHOOL_WORKSPACE_ID = 'smpnegeripacet_shared';
+const SHARED_SCHOOL_OPERATORS = new Set([
+  'sangpujangga.malam88@gmail.com',
+  'smpnegeripacet@gmail.com',
+]);
+
+function resolveCloudWorkspaceId(user: User | null): string {
+  if (!user) return 'admin';
+  const normalizedEmail = (user.email || '').trim().toLowerCase();
+  if (user.emailVerified && SHARED_SCHOOL_OPERATORS.has(normalizedEmail)) {
+    return SHARED_SCHOOL_WORKSPACE_ID;
+  }
+  return user.uid;
+}
+
 function MainWorkspace() {
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
@@ -86,6 +105,9 @@ function MainWorkspace() {
   const [dataLoading, setDataLoading] = useState(true);
 
   const authMode: AuthMode = firebaseUser ? 'google' : 'admin';
+  const cloudWorkspaceId = resolveCloudWorkspaceId(firebaseUser);
+  const isSharedSchoolCloud =
+    authMode === 'google' && cloudWorkspaceId === SHARED_SCHOOL_WORKSPACE_ID;
 
   const loadAdminWorkspace = useCallback(async () => {
     try {
@@ -125,10 +147,111 @@ function MainWorkspace() {
     }
 
     if (authMode === 'google' && firebaseUser) {
+      let cancelled = false;
+      let migrationChecked = false;
       setDataLoading(true);
-      setSettings(createDefaultSchoolSettings(firebaseUser.uid));
+      setSettings(createDefaultSchoolSettings(cloudWorkspaceId));
 
-      const settingsRef = doc(db, 'schoolSettings', firebaseUser.uid);
+      const migrateLegacyPersonalWorkspaceIfNeeded = async () => {
+        if (
+          migrationChecked ||
+          cloudWorkspaceId !== SHARED_SCHOOL_WORKSPACE_ID ||
+          firebaseUser.uid === SHARED_SCHOOL_WORKSPACE_ID
+        ) {
+          return;
+        }
+        migrationChecked = true;
+        try {
+          const oldSettingsRef = doc(db, 'schoolSettings', firebaseUser.uid);
+          const [oldSettingsSnap, oldEmpSnap, oldStuSnap, oldLetSnap] =
+            await Promise.all([
+              getDoc(oldSettingsRef),
+              getDocs(
+                query(
+                  collection(db, 'employees'),
+                  where('ownerId', '==', firebaseUser.uid)
+                )
+              ),
+              getDocs(
+                query(
+                  collection(db, 'students'),
+                  where('ownerId', '==', firebaseUser.uid)
+                )
+              ),
+              getDocs(
+                query(
+                  collection(db, 'letters'),
+                  where('ownerId', '==', firebaseUser.uid)
+                )
+              ),
+            ]);
+
+          if (
+            cancelled ||
+            (!oldSettingsSnap.exists() &&
+              oldEmpSnap.empty &&
+              oldStuSnap.empty &&
+              oldLetSnap.empty)
+          ) {
+            return;
+          }
+
+          const batch = writeBatch(db);
+          let ops = 0;
+
+          if (oldSettingsSnap.exists()) {
+            const raw = oldSettingsSnap.data();
+            batch.set(doc(db, 'schoolSettings', SHARED_SCHOOL_WORKSPACE_ID), {
+              ...raw,
+              ownerId: SHARED_SCHOOL_WORKSPACE_ID,
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            });
+            ops += 1;
+          }
+
+          for (const d of oldEmpSnap.docs) {
+            if (ops >= 450) break;
+            batch.set(doc(collection(db, 'employees')), {
+              ...d.data(),
+              ownerId: SHARED_SCHOOL_WORKSPACE_ID,
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            });
+            ops += 1;
+          }
+
+          for (const d of oldStuSnap.docs) {
+            if (ops >= 450) break;
+            batch.set(doc(collection(db, 'students')), {
+              ...d.data(),
+              ownerId: SHARED_SCHOOL_WORKSPACE_ID,
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            });
+            ops += 1;
+          }
+
+          for (const d of oldLetSnap.docs) {
+            if (ops >= 450) break;
+            batch.set(doc(collection(db, 'letters')), {
+              ...d.data(),
+              ownerId: SHARED_SCHOOL_WORKSPACE_ID,
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            });
+            ops += 1;
+          }
+
+          if (ops > 0 && !cancelled) {
+            await batch.commit();
+          }
+        } catch {
+          // Ignore one-time legacy workspace check errors
+        }
+      };
+
+      const settingsRef = doc(db, 'schoolSettings', cloudWorkspaceId);
       const unsubSettings = onSnapshot(
         settingsRef,
         (snap) => {
@@ -136,18 +259,23 @@ function MainWorkspace() {
             setSettings(snap.data() as SchoolSettings);
             setHasExistingSettings(true);
           } else {
-            setSettings(createDefaultSchoolSettings(firebaseUser.uid));
+            setSettings(createDefaultSchoolSettings(cloudWorkspaceId));
             setHasExistingSettings(false);
+            void migrateLegacyPersonalWorkspaceIfNeeded();
           }
           setDataLoading(false);
         },
         (err) =>
-          handleFirestoreError(err, OperationType.GET, `schoolSettings/${firebaseUser.uid}`)
+          handleFirestoreError(
+            err,
+            OperationType.GET,
+            `schoolSettings/${cloudWorkspaceId}`
+          )
       );
 
       const empQ = query(
         collection(db, 'employees'),
-        where('ownerId', '==', firebaseUser.uid)
+        where('ownerId', '==', cloudWorkspaceId)
       );
       const unsubEmp = onSnapshot(
         empQ,
@@ -162,7 +290,7 @@ function MainWorkspace() {
 
       const stuQ = query(
         collection(db, 'students'),
-        where('ownerId', '==', firebaseUser.uid)
+        where('ownerId', '==', cloudWorkspaceId)
       );
       const unsubStu = onSnapshot(
         stuQ,
@@ -177,7 +305,7 @@ function MainWorkspace() {
 
       const letQ = query(
         collection(db, 'letters'),
-        where('ownerId', '==', firebaseUser.uid)
+        where('ownerId', '==', cloudWorkspaceId)
       );
       const unsubLet = onSnapshot(
         letQ,
@@ -195,6 +323,7 @@ function MainWorkspace() {
       );
 
       return () => {
+        cancelled = true;
         unsubSettings();
         unsubEmp();
         unsubStu();
@@ -207,7 +336,7 @@ function MainWorkspace() {
     setStudents([]);
     setLetters([]);
     setDataLoading(false);
-  }, [authReady, authMode, firebaseUser, loadAdminWorkspace]);
+  }, [authReady, authMode, firebaseUser, cloudWorkspaceId, loadAdminWorkspace]);
 
   const handleGoogleLogin = async () => {
     setAuthError(null);
@@ -221,6 +350,12 @@ function MainWorkspace() {
         setAuthError(
           `Domain "${host}" belum didaftarkan di Firebase Console (Authentication → Settings → Authorized domains). Data tetap tersimpan otomatis di browser.`
         );
+      } else if (code === 'auth/popup-blocked') {
+        setAuthError(
+          'Popup login diblokir browser. Izinkan popup untuk situs ini lalu klik Sinkron Cloud Google kembali.'
+        );
+      } else if (code === 'auth/popup-closed-by-user') {
+        setAuthError('Jendela login Google ditutup sebelum selesai.');
       } else {
         setAuthError(
           err instanceof Error ? err.message : 'Gagal menghubungkan akun Google.'
@@ -245,7 +380,7 @@ function MainWorkspace() {
     );
   }
 
-  const activeUserId = authMode === 'admin' ? 'admin' : firebaseUser!.uid;
+  const activeUserId = authMode === 'admin' ? 'admin' : cloudWorkspaceId;
   const activeSettings = settings || createDefaultSchoolSettings(activeUserId);
 
   const openComposerWithCategory = (cat: LetterCategory) => {
@@ -351,6 +486,11 @@ function MainWorkspace() {
                 ? firebaseUser?.email || 'Cloud Firestore'
                 : 'Operator Tata Usaha'}
             </div>
+            {isSharedSchoolCloud && (
+              <div className="text-[11px] text-sky-800 font-medium truncate mt-0.5">
+                Cloud Sekolah Bersama
+              </div>
+            )}
           </div>
           {authError && (
             <div className="text-[11px] text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1">

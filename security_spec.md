@@ -1,8 +1,8 @@
 # Security Specification — E-Surat Sekolah (Kemendagri)
 
 ## 1. Data Invariants
-1. **Strict Tenant Isolation**: Every document in `schoolSettings`, `employees`, `students`, and `letters` belongs to a single verified Google-authenticated user (`ownerId == request.auth.uid`). No cross-tenant reads, lists, updates, or deletes are permitted.
-2. **Verified Auth Mandatory**: Unauthenticated users and users with `email_verified != true` have zero read/write access across all collections.
+1. **Strict Tenant & Shared School Operator Isolation**: Every document in `schoolSettings`, `employees`, `students`, and `letters` belongs either to a single verified Google-authenticated user (`ownerId == request.auth.uid`) or to the linked school workspace (`ownerId == 'smpnegeripacet_shared'`), which is strictly accessible only to verified Google accounts `sangpujangga.malam88@gmail.com` and `smpnegeripacet@gmail.com` (`email_verified == true`). No other cross-tenant reads, lists, updates, or deletes are permitted.
+2. **Verified Auth Mandatory**: Unauthenticated users and users with `email_verified != true` have zero read/write access across all collections (including email-based shared workspace checks to prevent email spoofing).
 3. **Immutable Ownership & Creation Time**: `ownerId` and `createdAt` are immutable after document creation. `createdAt` on create and `updatedAt` on create/update must equal `request.time`.
 4. **Terminal State Locking on Letters**: A `Letter` transitions through `draf` -> `terbit` -> `arsip`. Once `status == 'arsip'`, no further updates are permitted (immutable official archive record).
 5. **Bounded Payload & No Shadow Fields**: Every collection strictly enforces `keys().hasAll(...)` and `keys().hasOnly(...)` on create, `affectedKeys().hasOnly(...)` on update, `isValidId(docId)` on single-doc operations, and explicit `.size()` bounds on all strings and maps.
