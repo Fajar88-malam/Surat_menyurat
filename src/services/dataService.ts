@@ -3,9 +3,14 @@ import {
   collection,
   deleteDoc,
   doc,
+  getDoc,
+  getDocs,
+  limit,
+  query,
   serverTimestamp,
   setDoc,
   updateDoc,
+  where,
   writeBatch,
 } from 'firebase/firestore';
 import { auth, db, handleFirestoreError, OperationType } from '../firebase';
@@ -670,4 +675,173 @@ export async function generateLetterDraftWithGemini(params: {
     throw new Error(data.error || 'Gagal menyusun draf surat dengan Gemini AI.');
   }
   return data.draft || {};
+}
+
+function clampStr(val: unknown, maxLen: number, fallback = ''): string {
+  const s = typeof val === 'string' ? val.trim() : fallback;
+  return s.slice(0, maxLen);
+}
+
+function clampRequiredStr(val: unknown, minLen: number, maxLen: number, fallback: string): string {
+  const s = clampStr(val, maxLen, fallback);
+  return s.length >= minLen ? s : fallback.slice(0, maxLen);
+}
+
+export async function syncLocalWorkspaceToCloudIfEmpty(workspaceId: string): Promise<boolean> {
+  const local = loadLocalWorkspace();
+  const defaults = createDefaultSchoolSettings(workspaceId);
+  const s = local.settings;
+
+  const hasCustomSettings =
+    s.namaSekolah !== defaults.namaSekolah ||
+    s.pemerintahDaerah !== defaults.pemerintahDaerah ||
+    s.kepalaSekolahNama !== defaults.kepalaSekolahNama ||
+    Boolean(s.logoDaerahDataUrl) ||
+    Boolean(s.logoSekolahDataUrl);
+
+  if (
+    !hasCustomSettings &&
+    local.employees.length === 0 &&
+    local.students.length === 0 &&
+    local.letters.length === 0
+  ) {
+    return false;
+  }
+
+  try {
+    const [cloudSettingsSnap, cloudEmpSnap, cloudStuSnap, cloudLetSnap] = await Promise.all([
+      getDoc(doc(db, 'schoolSettings', workspaceId)),
+      getDocs(query(collection(db, 'employees'), where('ownerId', '==', workspaceId), limit(1))),
+      getDocs(query(collection(db, 'students'), where('ownerId', '==', workspaceId), limit(1))),
+      getDocs(query(collection(db, 'letters'), where('ownerId', '==', workspaceId), limit(1))),
+    ]);
+
+    if (
+      cloudSettingsSnap.exists() ||
+      !cloudEmpSnap.empty ||
+      !cloudStuSnap.empty ||
+      !cloudLetSnap.empty
+    ) {
+      return false;
+    }
+
+    const batch = writeBatch(db);
+    let ops = 0;
+
+    if (hasCustomSettings) {
+      batch.set(doc(db, 'schoolSettings', workspaceId), {
+        ownerId: workspaceId,
+        pemerintahDaerah: clampRequiredStr(s.pemerintahDaerah, 2, 150, defaults.pemerintahDaerah),
+        dinasPendidikan: clampRequiredStr(s.dinasPendidikan, 2, 150, defaults.dinasPendidikan),
+        namaSekolah: clampRequiredStr(s.namaSekolah, 2, 150, defaults.namaSekolah),
+        npsn: clampStr(s.npsn, 20),
+        alamat: clampRequiredStr(s.alamat, 2, 250, defaults.alamat),
+        kota: clampRequiredStr(s.kota, 2, 100, defaults.kota),
+        kodePos: clampStr(s.kodePos, 15),
+        telepon: clampStr(s.telepon, 40),
+        email: clampStr(s.email, 120),
+        website: clampStr(s.website, 120),
+        kodeUnitSurat: clampRequiredStr(s.kodeUnitSurat, 1, 60, defaults.kodeUnitSurat),
+        kepalaSekolahNama: clampRequiredStr(s.kepalaSekolahNama, 2, 120, defaults.kepalaSekolahNama),
+        kepalaSekolahNip: clampStr(s.kepalaSekolahNip, 40),
+        kepalaSekolahPangkat: clampStr(s.kepalaSekolahPangkat, 80),
+        logoDaerahDataUrl: clampStr(s.logoDaerahDataUrl, 260000),
+        logoSekolahDataUrl: clampStr(s.logoSekolahDataUrl, 260000),
+        tampilkanLogoKanan: Boolean(s.tampilkanLogoKanan),
+        polaPenomoran:
+          s.polaPenomoran === 'kemendagri_bulan_romawi' ||
+          s.polaPenomoran === 'kemendagri_bulan_angka'
+            ? s.polaPenomoran
+            : 'kemendagri_2023',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      ops += 1;
+    }
+
+    for (const emp of local.employees) {
+      if (ops >= 450) break;
+      const statusKepeg =
+        emp.statusKepegawaian === 'PPPK' ||
+        emp.statusKepegawaian === 'Honorer' ||
+        emp.statusKepegawaian === 'CPNS'
+          ? emp.statusKepegawaian
+          : 'PNS';
+      batch.set(doc(collection(db, 'employees')), {
+        ownerId: workspaceId,
+        nama: clampRequiredStr(emp.nama, 2, 140, 'Pegawai'),
+        nip: clampStr(emp.nip, 40),
+        nuptk: clampStr(emp.nuptk, 40),
+        pangkatGolongan: clampStr(emp.pangkatGolongan, 80),
+        jabatan: clampRequiredStr(emp.jabatan, 1, 120, 'Guru/Pegawai'),
+        statusKepegawaian: statusKepeg,
+        unitKerja: clampStr(emp.unitKerja, 120),
+        telepon: clampStr(emp.telepon, 30),
+        email: clampStr(emp.email, 120),
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      ops += 1;
+    }
+
+    for (const stu of local.students) {
+      if (ops >= 450) break;
+      const jk = stu.jenisKelamin === 'P' ? 'P' : 'L';
+      const statusSiswa =
+        stu.status === 'Mutasi Keluar' || stu.status === 'Lulus' ? stu.status : 'Aktif';
+      batch.set(doc(collection(db, 'students')), {
+        ownerId: workspaceId,
+        nama: clampRequiredStr(stu.nama, 2, 140, 'Siswa'),
+        nis: clampStr(stu.nis, 30),
+        nisn: clampStr(stu.nisn, 30),
+        tempatLahir: clampStr(stu.tempatLahir, 80),
+        tanggalLahir: clampStr(stu.tanggalLahir, 30),
+        jenisKelamin: jk,
+        kelas: clampRequiredStr(stu.kelas, 1, 40, '-'),
+        namaOrangTua: clampStr(stu.namaOrangTua, 140),
+        pekerjaanOrangTua: clampStr(stu.pekerjaanOrangTua, 100),
+        alamat: clampStr(stu.alamat, 250),
+        teleponOrangTua: clampStr(stu.teleponOrangTua, 30),
+        status: statusSiswa,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      ops += 1;
+    }
+
+    for (const letItem of local.letters) {
+      if (ops >= 450) break;
+      const payloadObj =
+        letItem.payload && typeof letItem.payload === 'object' && !Array.isArray(letItem.payload)
+          ? letItem.payload
+          : {};
+      const payloadEntries = Object.entries(payloadObj).slice(0, 40);
+      const safePayload = Object.fromEntries(payloadEntries);
+
+      batch.set(doc(collection(db, 'letters')), {
+        ownerId: workspaceId,
+        kategori: letItem.kategori,
+        subKategori: clampRequiredStr(letItem.subKategori, 1, 60, 'umum'),
+        kodeKlasifikasi: clampRequiredStr(letItem.kodeKlasifikasi, 1, 30, '400.3.5'),
+        nomorUrut: clampRequiredStr(letItem.nomorUrut, 1, 20, '001'),
+        nomorSurat: clampRequiredStr(letItem.nomorSurat, 3, 120, '400.3.5/001'),
+        tanggalSurat: clampRequiredStr(letItem.tanggalSurat, 4, 30, '2026-01-01'),
+        perihal: clampRequiredStr(letItem.perihal, 2, 220, 'Naskah Dinas'),
+        tujuanSurat: clampStr(letItem.tujuanSurat, 200),
+        status:
+          letItem.status === 'terbit' || letItem.status === 'arsip' ? letItem.status : 'draf',
+        modeTtd: letItem.modeTtd === 'tte' ? 'tte' : 'basah',
+        payload: safePayload,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      ops += 1;
+    }
+
+    if (ops === 0) return false;
+    await batch.commit();
+    return true;
+  } catch {
+    return false;
+  }
 }

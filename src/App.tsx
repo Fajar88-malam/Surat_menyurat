@@ -36,7 +36,11 @@ import {
   handleFirestoreError,
   OperationType,
 } from './firebase';
-import { AuthMode, fetchAdminWorkspace } from './services/dataService';
+import {
+  AuthMode,
+  fetchAdminWorkspace,
+  syncLocalWorkspaceToCloudIfEmpty,
+} from './services/dataService';
 import {
   Employee,
   LetterCategory,
@@ -187,12 +191,17 @@ function MainWorkspace() {
             ]);
 
           if (
-            cancelled ||
-            (!oldSettingsSnap.exists() &&
-              oldEmpSnap.empty &&
-              oldStuSnap.empty &&
-              oldLetSnap.empty)
+            !cancelled &&
+            !oldSettingsSnap.exists() &&
+            oldEmpSnap.empty &&
+            oldStuSnap.empty &&
+            oldLetSnap.empty
           ) {
+            await syncLocalWorkspaceToCloudIfEmpty(cloudWorkspaceId);
+            return;
+          }
+
+          if (cancelled) {
             return;
           }
 
@@ -245,9 +254,13 @@ function MainWorkspace() {
 
           if (ops > 0 && !cancelled) {
             await batch.commit();
+          } else if (!cancelled) {
+            await syncLocalWorkspaceToCloudIfEmpty(cloudWorkspaceId);
           }
         } catch {
-          // Ignore one-time legacy workspace check errors
+          if (!cancelled) {
+            await syncLocalWorkspaceToCloudIfEmpty(cloudWorkspaceId);
+          }
         }
       };
 
@@ -261,7 +274,14 @@ function MainWorkspace() {
           } else {
             setSettings(createDefaultSchoolSettings(cloudWorkspaceId));
             setHasExistingSettings(false);
-            void migrateLegacyPersonalWorkspaceIfNeeded();
+            if (
+              cloudWorkspaceId === SHARED_SCHOOL_WORKSPACE_ID &&
+              firebaseUser.uid !== SHARED_SCHOOL_WORKSPACE_ID
+            ) {
+              void migrateLegacyPersonalWorkspaceIfNeeded();
+            } else {
+              void syncLocalWorkspaceToCloudIfEmpty(cloudWorkspaceId);
+            }
           }
           setDataLoading(false);
         },
